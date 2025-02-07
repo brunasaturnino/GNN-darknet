@@ -1,1 +1,1 @@
-# GNN---darknet
+# GNN-darknet
