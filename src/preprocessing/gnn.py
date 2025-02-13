@@ -350,74 +350,71 @@ def uniform_features(df, lookup, node_type):
 
 
 
-def generate_adjacency_matrices(flist, weighted=True):
-    """ Generate adjacency matrices from a list of DataFrame files.
+import torch
+import pandas as pd
+import numpy as np
+import json
+import os
 
-    Parameters:
-    -----------
-    flist : list
-        A list of file paths, each containing a DataFrame of network data.
-    weighted : bool, optional
-        If True, the edges in the generated matrices will be weighted, 
-        by default True.
-
-    Returns:
-    --------
-    list
-        A list of torch sparse tensors representing the adjacency matrices.
-
-    Notes:
-    ------
-    - This function generates adjacency matrices from a list of DataFrame files.
-    - If `weighted` is True, the edges in the matrices will be weighted based on packet 
-      counts.
-    """
-    traces = []
+def generate_adjacency_matrices(flist, ip_lookup_path, weighted=True):
     edges = []
-    for fname in tqdm(flist, desc='Loading graphs'):
-        data = pd.read_csv(fname, header=None, 
-                           names=["src", "dst", "weight", "label"])
-        if not weighted:
-            data['weight'] = 1
 
-        self_loops_value = 1
-        traces.append(data)
+    # Carregar dicionário de IPs
+    if not os.path.exists(ip_lookup_path):
+        raise FileNotFoundError(f"Arquivo de lookup de IPs não encontrado: {ip_lookup_path}")
 
-        edges.append(data[['src', 'dst', 'weight']])
+    with open(ip_lookup_path, "r") as file:
+        ip_lookup = json.load(file)
 
-    tot_nodes = max([max(edge.src.max(), edge.dst.max()) for edge in edges])+1
+    # Criar um dicionário reverso (ID → IP)
+    reverse_lookup = {v: k for k, v in ip_lookup.items()}
+    ip_nodes = len(reverse_lookup)  # Número total de nós
 
-    indices = [np.stack([
-        # Source nodes
-        np.concatenate((
-            edge.src.values, # Original edges
-            edge.dst.values, # Symmetric edges
-            np.arange(tot_nodes) # Self-loops
-        )),
-        # Destination nodes
-        np.concatenate((
-            edge.dst.values, # Original edges
-            edge.src.values, # Symmetric edges
-            np.arange(tot_nodes) # Self-loops
-        ))]) for edge in edges]
+    for file in flist:
+        print(f"Carregando {file}...")  # Log para depuração
+        data = pd.read_csv(file, delim_whitespace=True, names=["src", "dst", "weight"], dtype=str)
+
+        # Remover espaços e garantir que são strings
+        data["src"] = data["src"].astype(str).str.strip()
+        data["dst"] = data["dst"].astype(str).str.strip()
+
+        # Verificar se os IPs estão no lookup e substituí-los por IDs numéricos
+        data = data[data["src"].isin(ip_lookup) & data["dst"].isin(ip_lookup)]
+        data["src"] = data["src"].map(ip_lookup)
+        data["dst"] = data["dst"].map(ip_lookup)
+        data["weight"] = pd.to_numeric(data["weight"], errors="coerce")
+
+        # Debug: Mostrar dados após a conversão
+        print(f"{file} - Dados convertidos para IDs numéricos:")
+        print(data.head())
+
+        # Remove linhas com NaN e força tipos corretos
+        data = data.dropna().astype({"src": "int", "dst": "int", "weight": "float"})
+
+        if data.empty:
+            print(f"Aviso: O arquivo {file} está vazio após a limpeza!")
+
+        edges.append(data[["src", "dst", "weight"]])
+
+    # Verifica se há arestas antes de calcular `tot_nodes`
+    if not edges:
+        raise ValueError("Nenhum dado de arestas carregado. Verifique os arquivos de entrada.")
+
+    # O número total de nós deve ser o mesmo do lookup
+    tot_nodes = ip_nodes
+
+    # Constrói índices e valores da matriz esparsa com o tamanho correto
+    indices = [
+        np.stack([
+            np.concatenate((edge["src"].values, edge["dst"].values)),
+            np.concatenate((edge["dst"].values, edge["src"].values))
+        ])
+        for edge in edges
+    ]
 
     values = [
-        np.concatenate((
-            edge["weight"].values.reshape(-1,), 
-            edge["weight"].values.reshape(-1,), 
-            self_loops_value*np.ones([tot_nodes,])
-        ))
-        for edge in edges]
-    
-    adjs = []
-    for i in tqdm(range(len(edges)), desc='Generating matrices'):
-        adjs.append(
-            _sparse_mx_to_torch_sparse_tensor(
-                _normalize(
-                    coo_matrix(
-                        (values[i], 
-                         (indices[i][0], indices[i][1])), 
-                        shape=(tot_nodes, tot_nodes),
-                        dtype=np.float32))))
-    
-    return adjs
+        np.concatenate((edge["weight"].values, edge["weight"].values))
+        for edge in edges
+    ]
+
+    return [torch.sparse_coo_tensor(ind, val, (tot_nodes, tot_nodes)) for ind, val in zip(indices, values)]
