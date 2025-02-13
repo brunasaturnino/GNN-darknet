@@ -1,0 +1,15 @@
+,precision,recall,f1-score,support
+benign,0.0,0.0,0.0,2.0
+censys,0.0,0.0,0.0,1.0
+driftnet,0.0,0.0,0.0,1.0
+internetcensus,0.3333333333333333,0.5,0.4,4.0
+intrinsec,0.0,0.0,0.0,2.0
+mirai,0.0,0.0,0.0,3.0
+rapid7,0.0,0.0,0.0,2.0
+securitytrails,0.0,0.0,0.0,1.0
+unk_bruteforcer,0.0,0.0,0.0,1.0
+unk_exploiter,0.0,0.0,0.0,2.0
+unk_spammer,0.0,0.0,0.0,1.0
+accuracy,0.1,0.1,0.1,0.1
+macro avg,0.0303030303030303,0.045454545454545456,0.03636363636363637,20.0
+weighted avg,0.06666666666666667,0.1,0.08,20.0
